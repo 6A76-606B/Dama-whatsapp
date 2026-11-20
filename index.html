@@ -256,6 +256,7 @@ svg.i{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stro
 .athumb{width:52px;height:52px;border-radius:10px;overflow:hidden;flex:none;display:block}
 
 /* ---- admin screens (all) ---- */
+.composer.lock{opacity:.45;pointer-events:none}
 .ascr{background:radial-gradient(120% 60% at 50% 0,rgba(46,124,255,.10),transparent 60%),var(--bg)}
 .ascr .row{width:auto;margin:8px 12px 0;padding:11px 12px;background:var(--bg2);border:1px solid var(--line);border-radius:16px;transition:.15s}
 .ascr .row:active{transform:scale(.99);border-color:var(--blue)}
@@ -340,7 +341,7 @@ const ADMIN_EMAIL = 'markogorge18@gmail.com';
 const GEMINI_KEY = 'PASTE_YOUR_GEMINI_KEY_HERE';
 /* رابط الـ Worker (Cloudflare) اللي بيكلّم Gemini بدالك — شوف gemini-proxy-worker.js. لو فاضي الاتصال بيبقى مباشر من المتصفح زي الأول. */
 const AI_PROXY_URL = 'https://snowy-dawn-2ddb.markogorge18.workers.dev/';
-const GEMINI_MODELS = ['gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite']; /* بيجرب بالترتيب لو الأول مش متاح */
+const GEMINI_MODELS = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-flash-lite-latest', 'gemini-2.5-flash-lite']; /* بيجرب بالترتيب لو الأول مش متاح */
 const GEMINI_MODEL = GEMINI_MODELS[0];
 const GEMINI_IMG_MODELS = ['gemini-3.8-flash-image', 'gemini-2.5-flash-image'];
 const GEMINI_IMG_MODEL = GEMINI_IMG_MODELS[0]; /* لتوليد الصور ("ارسم ...") */
@@ -747,7 +748,6 @@ function openChat(id) {
   closeOvQuiet(); cur = id; curKind = 'chat'; firstLoad = true; ovBack = null;
   ov(`<header class="bar" id="chead"></header><div class="msgs" id="msgs"></div>
     <div class="emo" id="emo" hidden><button data-a="filepick" aria-label="ملف" style="font-size:1rem;display:flex;align-items:center;gap:6px;color:var(--blue2)">${ic('doc')} ملف</button><button data-a="pollform" style="font-size:1rem;color:var(--blue2)">📊 تصويت</button>${EMOJIS.map(e => `<button data-a="emo" data-e="${e}">${e}</button>`).join('')}</div>
-    ${c.type === 'ai' ? `<div class="mnlist" id="aichips">${['لخصلي موضوع', 'قولي نكتة'].map(x => `<button data-a="aichip" data-t="${x}">${x}</button>`).join('')}</div>` : ''}
     <div class="mnlist" id="mnl" hidden></div>
     <div class="rpbar" id="rpbar" hidden></div>
     <div class="composer" id="cmp">${composerHTML()}</div>`);
@@ -830,6 +830,8 @@ function openPollForm() {
     <div class="acts"><button class="btn out" data-a="mx">إلغاء</button><button class="btn pri" data-a="pollsend">نشر</button></div></div>`;
 }
 let aiBusy = false;
+function setAiBusy(v) { aiBusy = v; const c = curChat && curKind === 'chat' ? curChat() : null, cmp = $('#cmp'); if (cmp) cmp.classList.toggle('lock', !!v && !!c && c.type === 'ai'); if (curKind === 'chat') drawHeader(); }
+const aiLocked = () => { const c = curKind === 'chat' ? curChat() : null; if (aiBusy && c && c.type === 'ai') { toast('استنى شلبي يخلّص رده 😄'); return true; } return false; };
 let replyTo = null, menuMsg = null, fwdMsg = null;
 let hid = new Set(JSON.parse(localStorage.getItem('dama_hid') || '[]'));
 const prevOf = m => m.t === 'text' ? String(m.x || '').slice(0, 80) : m.t === 'poll' ? '📊 ' + m.q : m.t === 'img' ? '📷 صورة' : m.t === 'voice' ? '🎤 رسالة صوتية' : '📄 ' + (m.name || 'ملف');
@@ -929,13 +931,15 @@ async function sendMsg(c, payload, preview) {
 async function sendCur(payload, preview) {
   if (curKind === 'chan') return sendPost(payload, preview);
   const c = curChat(); if (!c) return;
+  if (c.type === 'ai' && aiBusy) return toast('استنى شلبي يخلّص رده 😄');
   if (c.type === 'ai' && payload.t !== 'text' && payload.t !== 'img') return toast(AI_NAME + ' بيفهم النصوص والصور بس');
   if (replyTo) { payload = {...payload, rt: replyTo}; replyTo = null; drawReplyBar(); }
-  try { await sendMsg(c, payload, preview); } catch (e) { return toast('تعذر الإرسال: ' + (e.code || e.message)); }
+  if (c.type === 'ai') setAiBusy(true);
+  try { await sendMsg(c, payload, preview); } catch (e) { if (c.type === 'ai') setAiBusy(false); return toast('تعذر الإرسال: ' + (e.code || e.message)); }
   if ((payload.t === 'text' || payload.t === 'img') && (c.type === 'ai' || (payload.t === 'text' && AI_MENTION.test(payload.x || '')))) askAI(c, {text: payload.x || '', img: payload.t === 'img' ? payload.data : null, who: me.name});
 }
 /* ---------- شلبي AI ---------- */
-const AI_SYS = (n, group) => `انت "شلبي"، مساعد ذكي جوه تطبيق داما واتساب (زي Meta AI في واتساب). ${group ? 'انت في جروب وفيه ناس كتير، ورسايلهم بتبدأ باسم صاحبها، ورد على اللي ندهك (' + n + ') بإيجاز ومن غير ما تنحاز لحد.' : 'بتتكلم مع ' + n + '.'} اتكلم بنفس لغة السؤال (والعامية المصرية لو كتب بالعربي) وبردود قصيرة ومفيدة ومنظمة. تقدر تجاوب على الأسئلة وتشرح وتلخص وتترجم وتكتب وتحل مسائل وتوصف الصور اللي اتبعتتلك، وتقدر ترسم صور لو المستخدم كتب "ارسم ..." وتدور في النت للمعلومات الحديثة. التطبيق بيستخدمه طلاب، فخلي كلامك مناسب للسن ومؤدب، ومترفضش أي طلب فيه إيذاء أو محتوى جنسي أو عنف أو مخدرات أو كشف خصوصية ناس، وانصح بلطف بالتوجه لشخص كبير موثوق لو الموضوع خطير. متدّعيش إنك إنسان.`;
+const AI_SYS = (n, group) => `انت "شلبي"، مساعد ذكي فرفوش وخفيف الدم جوه تطبيق داما واتساب. ${group ? 'انت في جروب وفيه ناس كتير، ورسايلهم بتبدأ باسم صاحبها، ورد على اللي ندهك (' + n + ') بإيجاز ومن غير ما تنحاز لحد.' : 'بتتكلم مع ' + n + '.'} شخصيتك: مرح وبتهزر وبتقول إفيهات وتعليقات ظريفة وبتستخدم إيموجي، بس من غير ما تقلل من فايدة الرد. اتكلم بالعامية المصرية لو كتب بالعربي، وبنفس لغة السؤال لو لغة تانية. ردودك قصيرة جداً ومباشرة (جملة لتلاتة غالباً) إلا لو طلب شرح مفصل. تقدر تجاوب وتشرح وتلخص وتترجم وتكتب وتحل مسائل وتوصف الصور، وتقدر ترسم لو كتب "ارسم ...". التطبيق بيستخدمه طلاب، فخلي هزارك مؤدب ومناسب للسن، ومترفضش أي طلب فيه إيذاء أو محتوى جنسي أو عنف أو مخدرات أو كشف خصوصية ناس، وانصح بلطف بالتوجه لشخص كبير موثوق لو الموضوع خطير. متدّعيش إنك إنسان.`;
 const shrinkData = (url, max = 1024, qual = .72) => new Promise((res, rej) => {
   const i = new Image(); i.onload = () => { const k = Math.min(1, max / Math.max(i.width, i.height)), cv = document.createElement('canvas');
     cv.width = Math.round(i.width * k); cv.height = Math.round(i.height * k); cv.getContext('2d').drawImage(i, 0, 0, cv.width, cv.height);
@@ -980,40 +984,42 @@ async function geminiTry(models, body) {
       if (modelGone(x.r, x.j)) break;
       if (!aiBusyErr(x.r, x.j)) return x;
       if (/quota|limit: 0/i.test(msgOf(x.r, x.j))) break;
-      if (k === 0) await sleep(2000);
+      if (k === 0) await sleep(1200);
     }
   }
   return last;
 }
 function aiErrText(e) {
-  const m = String((e && e.message) || e || '');
+  const m = String((e && e.message) || e || ''); console.error('AI error:', m);
   if (/limit: 0|free tier|image/i.test(m) && /quota|limit/i.test(m)) return 'رسم الصور مش متاح في الباقة المجانية لمفتاح Gemini (محتاج تفعيل الدفع)';
   if (/quota|rate.?limit|429/i.test(m)) return 'وصلنا للحد المسموح دلوقتي، جرب بعد شوية';
   if (/high demand|overloaded|unavailable|503|500/i.test(m)) return 'السيرفر مضغوط دلوقتي، جرب تاني بعد دقيقة';
-  if (/no longer available|not found|404/i.test(m)) return 'موديل الذكاء الاصطناعي اتغير، لازم تحديث اسمه في الكود';
-  return m.length > 90 ? m.slice(0, 90) + '…' : m;
+  if (/no longer available|not found|404/i.test(m)) return 'موديل الذكاء الاصطناعي مش متاح — ' + m.slice(0, 120);
+  return m.length > 120 ? m.slice(0, 120) + '…' : m;
 }
 async function askAI(c, trig) {
-  if (!AI_PROXY_URL && String(GEMINI_KEY).startsWith('PASTE')) return toast('مفتاح Gemini لسه متحطش في الملف');
-  aiBusy = true; drawHeader();
+  if (!AI_PROXY_URL && String(GEMINI_KEY).startsWith('PASTE')) { setAiBusy(false); return toast('مفتاح Gemini لسه متحطش في الملف'); }
+  setAiBusy(true);
   try {
     const raw = String(trig.text || '').replace(AI_MENTION_G, '').trim(), im = raw.match(IMG_CMD);
     if (im) await aiImage(c, im[1]); else await aiText(c, trig, raw);
   } catch (e) { console.error('askAI', e); toast('تعذر رد ' + AI_NAME + ': ' + aiErrText(e)); }
-  aiBusy = false; if (curKind === 'chat') drawHeader();
+  setAiBusy(false);
 }
 async function aiText(c, trig, raw) {
   const group = c.type !== 'ai', name = trig.who || me.name;
-  let hist = msgs.filter(m => m.t === 'text' && m.x && !m.pending).slice(-14).map(m => ({role: m.from === 'shalaby' ? 'model' : 'user', parts: [{text: group && m.from !== 'shalaby' ? (m.fromName || getU(m.from).name) + ': ' + m.x : m.x}]}));
+  let hist = msgs.filter(m => m.t === 'text' && m.x && !m.pending).slice(-8).map(m => ({role: m.from === 'shalaby' ? 'model' : 'user', parts: [{text: group && m.from !== 'shalaby' ? (m.fromName || getU(m.from).name) + ': ' + m.x : m.x}]}));
   if (raw && hist.length && hist[hist.length - 1].role === 'user' && hist[hist.length - 1].parts[0].text.includes(raw)) hist.pop();
   const parts = [{text: (group ? name + ': ' : '') + (raw || (trig.img ? 'اشرحلي الصورة دي' : 'اهلا'))}];
   if (trig.img) { const mm = String(trig.img).match(/^data:([^;]+);base64,(.+)$/); if (mm) parts.push({inlineData: {mimeType: mm[1], data: mm[2]}}); }
   hist.push({role: 'user', parts});
   const contents = []; hist.forEach(h => { const l = contents[contents.length - 1]; if (l && l.role === h.role) l.parts.push(...h.parts); else contents.push({role: h.role, parts: [...h.parts]}); });
   while (contents.length && contents[0].role !== 'user') contents.shift();
-  const body = {systemInstruction: {parts: [{text: AI_SYS(name, group)}]}, contents, generationConfig: {maxOutputTokens: 900, temperature: .8}};
-  let {r, j} = await geminiTry(GEMINI_MODELS, {...body, tools: [{google_search: {}}]});
-  if (!r.ok) ({r, j} = await geminiTry(GEMINI_MODELS, body));
+  const body = {systemInstruction: {parts: [{text: AI_SYS(name, group)}]}, contents, generationConfig: {maxOutputTokens: 500, temperature: .9, thinkingConfig: {thinkingBudget: 0}}};
+  const plain = {...body, generationConfig: {maxOutputTokens: 500, temperature: .9}};
+  const needWeb = /اخبار|أخبار|النهاردة|النهارده|دلوقتي|حاليا|حالياً|سعر|اسعار|أسعار|نتيجة|نتيجه|طقس|مباراة|ماتش|اخر|آخر|احدث|أحدث|latest|today|news|price|score|weather/i.test(raw);
+  let {r, j} = await geminiTry(GEMINI_MODELS, needWeb ? {...body, tools: [{google_search: {}}]} : body);   /* البحث في النت بس لو السؤال محتاجه (أسرع) */
+  if (!r.ok) ({r, j} = await geminiTry(GEMINI_MODELS, plain));
   if (!r.ok) throw new Error((j.error && j.error.message) || r.status);
   const out = (((j.candidates || [])[0] || {}).content || {}).parts;
   const ans = (out || []).map(p => p.text || '').join('').trim() || 'معلش، مقدرتش أرد دلوقتي. جرب تاني.';
@@ -1067,7 +1073,7 @@ function imgToData(file, max = 1024, qual = .72) {
 }
 let rec = null;
 async function startRec() {
-  if (rec) return;
+  if (rec || aiLocked()) return;
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) return toast('متصفحك لا يدعم التسجيل الصوتي');
   try {
     const stream = await navigator.mediaDevices.getUserMedia({audio: true}); micOk = true;
@@ -1118,7 +1124,7 @@ async function togglePlay(id) {
 }
 function paintPlay() { document.querySelectorAll('.voice').forEach(v => { const on = v.dataset.id === auId; v.classList.toggle('playing', on); v.querySelector('.pl').innerHTML = ic(on ? 'pause' : 'play'); }); }
 
-function pickFile(mode, accept) { pickMode = mode; const f = $('#fpick'); f.accept = accept; f.value = ''; f.click(); }
+function pickFile(mode, accept) { if (aiLocked()) return; pickMode = mode; const f = $('#fpick'); f.accept = accept; f.value = ''; f.click(); }
 async function onFilePicked(file) {
   if (!file) return;
   try {
